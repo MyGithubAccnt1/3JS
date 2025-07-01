@@ -2,8 +2,6 @@ import { useRef, useEffect } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import dirtImg from "/dirt.jpg";
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { BoxHelper } from 'three';
 
 function App() {
   const canvasRef = useRef(null);
@@ -52,35 +50,37 @@ function App() {
     let activeAction; // Keep track of the currently playing action
 
     loader.load('/char.glb', (gltf) => {
-        characterModel = gltf.scene;
-        characterModel.scale.set(10, 10, 10); // Scale up the model significantly
-        characterModel.traverse((node) => {
-            if (node.isMesh) {
-                node.castShadow = true;
-                node.receiveShadow = true;
-            }
+      characterModel = gltf.scene;
+      characterModel.scale.set(10, 10, 10);
+      characterModel.rotation.y = Math.PI;
+      const object4 = characterModel.getObjectByName('Object_4');
+      if (object4) {
+        object4.traverse((node) => {
+          if (node.isMesh && (node.name === 'Object_10' || node.name === 'Object_11')) {
+            node.visible = false;
+          }
         });
-
-        characterModel.visible = false;
-        characterModel.castShadow = false; // Ensure the invisible model doesn't cast shadows
-
-        scene.add(characterModel);
-
-        // Animation
-        mixer = new THREE.AnimationMixer(characterModel);
-        gltf.animations.forEach((clip) => {
-            const action = mixer.clipAction(clip);
-            actions[clip.name] = action;
-            console.log('Found animation:', clip.name);
-        });
-
-        // Use the 'motion' animation if it exists, otherwise fallback to the first one
-        if (actions['motion']) {
-            activeAction = actions['motion'];
-        } else if (gltf.animations.length > 0) {
-            activeAction = actions[gltf.animations[0].name];
+      }
+      characterModel.traverse((node) => {
+        if (node.isMesh) {
+            node.castShadow = true;
+            node.receiveShadow = true;
         }
+      });
 
+      scene.add(characterModel);
+
+      mixer = new THREE.AnimationMixer(characterModel);
+      gltf.animations.forEach((clip) => {
+          const action = mixer.clipAction(clip);
+          actions[clip.name] = action;
+      });
+
+      if (actions['motion']) {
+          activeAction = actions['motion'];
+      } else if (gltf.animations.length > 0) {
+          activeAction = actions[gltf.animations[0].name];
+      }
     }, undefined, (error) => {
         console.error('Error loading GLTF:', error);
     });
@@ -151,7 +151,7 @@ function App() {
     let jumpY = 0;
     let jumpVelocity = 0;
     let isJumping = false;
-    const jumpStrength = 2.5;
+    const jumpStrength = 3.5;
     const gravity = 0.1;
 
     let isThirdPerson = false;
@@ -163,9 +163,20 @@ function App() {
       if (e.code === "Space") keys.space = true;
       if (e.key === "Shift") isSprinting = true;
       if (e.key === "Tab") {
-        e.preventDefault(); // Prevent tabbing to another element
+        e.preventDefault();
         isThirdPerson = !isThirdPerson;
-        characterModel.visible = isThirdPerson;
+        if (characterModel) {
+          const object4 = characterModel.getObjectByName('Object_4');
+          if (object4) {
+            object4.traverse((node) => {
+              if (node.isMesh && (node.name === 'Object_10' || node.name === 'Object_11')) {
+                node.visible = isThirdPerson;
+                characterModel.visible = isThirdPerson;
+                characterModel.castShadow = isThirdPerson; 
+              }
+            });
+          }
+        }
       }
     }
     function handleKeyUp(e) {
@@ -251,7 +262,7 @@ function App() {
 
       if (moveDX !== 0 || moveDZ !== 0) {
         const len = Math.sqrt(moveDX * moveDX + moveDZ * moveDZ);
-        const currentSpeed = isSprinting ? moveSpeed * 3.5 : moveSpeed; // 3.5x speed when sprinting
+        const currentSpeed = isSprinting ? moveSpeed * 3 : moveSpeed;
         cameraX += (moveDX / len) * currentSpeed;
         cameraZ += (moveDZ / len) * currentSpeed;
       }
@@ -272,21 +283,20 @@ function App() {
 
       const camY = 210 + jumpY;
       if (characterModel) {
-        // The character model follows the camera's horizontal position.
         characterModel.position.set(cameraX, camY - 21, cameraZ - 3);
-        characterModel.rotation.y = yaw + Math.PI; // Add 180-degree rotation to face forward
+        characterModel.rotation.y = yaw;
       }
 
       if (isThirdPerson) {
-        const thirdPersonOffset = new THREE.Vector3(0, 15, -30); // Camera is higher and farther back
-        const offset = thirdPersonOffset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-        camera.position.copy(characterModel.position).add(offset);
-        camera.lookAt(characterModel.position.clone().add(new THREE.Vector3(0, 10, 0))); // Look at the character's torso
-      } else {
-        // The camera is now independent and controlled by player input.
-        camera.position.set(cameraX, camY, cameraZ);
+        camera.position.set(cameraX, camY, cameraZ + 30);
 
-        // The camera looks in the direction determined by the mouse (yaw and pitch).
+        const lookAtX = cameraX + Math.sin(yaw) * Math.cos(pitch);
+        const lookAtY = camY + Math.sin(pitch);
+        const lookAtZ = cameraZ + Math.cos(yaw) * Math.cos(pitch);
+        camera.lookAt(lookAtX, lookAtY, lookAtZ);
+      } else {
+        camera.position.set(cameraX, camY + 2, cameraZ - 1.4);
+        
         const lookAtX = cameraX + Math.sin(yaw) * Math.cos(pitch);
         const lookAtY = camY + Math.sin(pitch);
         const lookAtZ = cameraZ + Math.cos(yaw) * Math.cos(pitch);
@@ -299,6 +309,7 @@ function App() {
         if (activeAction) {
           if (moveDX !== 0 || moveDZ !== 0) {
             // Moving
+            activeAction.timeScale = isSprinting ? 3 : 1;
             if (!activeAction.isRunning()) {
               activeAction.play();
             }
@@ -330,98 +341,104 @@ function App() {
   }, []);
 
   return (
-    <div style={{ position: "relative" }}>
+    <div className="relative">
       <canvas
         ref={canvasRef}
-        style={{ width: "100dvw", height: "100dvh", display: "block" }}
+        className="w-[100dvw] h-[100dvh] block"
       ></canvas>
       <div
-        style={{
-          position: "absolute",
-          bottom: "20px",
-          left: "50%",
-          transform: "translateX(-50%)",
-          backgroundColor: "rgba(0, 0, 0, 0.5)",
-          color: "white",
-          padding: "1rem",
-          borderRadius: "8px",
-          fontFamily: "sans-serif",
-          textAlign: "center",
-          display: "flex",
-          flexDirection: "column",
-          gap: "0.5rem",
-        }}
+        className="absolute top-0 right-0 bg-[rgba(0,0,0,0.5)] color-white p-[2rem] rounded-sm flex flex-col gap-5"
       >
-        <div style={{ fontSize: "0.8rem", color: "#ccc" }}>
-          Click to lock mouse, then use it to look.
+        <div className="text-[0.8rem] text-[#ccc] text-center">
+          Click to lock mouse, then look around.
         </div>
-        <div style={{ display: "flex", justifyContent: "center", gap: "0.5rem" }}>
-          <kbd
-            style={{
-              padding: "0.5rem 0.75rem",
-              border: "1px solid white",
-              borderRadius: "4px",
-            }}
-          >
-            W
-          </kbd>
-        </div>
-        <div style={{ display: "flex", justifyContent: "center", gap: "0.5rem" }}>
-          <kbd
-            style={{
-              padding: "0.5rem 0.75rem",
-              border: "1px solid white",
-              borderRadius: "4px",
-            }}
-          >
-            A
-          </kbd>
-          <kbd
-            style={{
-              padding: "0.5rem 0.75rem",
-              border: "1px solid white",
-              borderRadius: "4px",
-            }}
-          >
-            S
-          </kbd>
-          <kbd
-            style={{
-              padding: "0.5rem 0.75rem",
-              border: "1px solid white",
-              borderRadius: "4px",
-            }}
-          >
-            D
-          </kbd>
-        </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "0.5rem",
-            marginTop: "0.25rem",
-          }}
-        >
-          <kbd
-            style={{
-              padding: "0.5rem 1.5rem",
-              border: "1px solid white",
-              borderRadius: "4px",
-            }}
-          >
-            TAB
-          </kbd>
-          <kbd
-            style={{
-              padding: "0.5rem 1.5rem",
-              border: "1px solid white",
-              borderRadius: "4px",
-            }}
-          >
-            SPACE
-          </kbd>
+        <div className="flex gap-5">
+          <div className="flex flex-col justify-between gap-5">
+            <div>
+              <kbd
+                style={{
+                  padding: "0.5rem 1.5rem",
+                  border: "1px solid white",
+                  borderRadius: "4px",
+                }}
+              >
+                TAB
+              </kbd>
+            </div>
+
+            <div>
+              <kbd
+                style={{
+                  padding: "0.5rem 1.5rem",
+                  border: "1px solid white",
+                  borderRadius: "4px",
+                }}
+              >
+                L SHIFT
+              </kbd>
+            </div>
+          </div>
+          <div className="flex flex-col justify-between gap-5">
+            <div>
+              <div className="flex flex-col gap-3">
+                <div className="flex justify-center">
+                  <kbd
+                    style={{
+                      padding: "0.5rem 0.75rem",
+                      border: "1px solid white",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    W
+                  </kbd>
+                </div>
+                <div className="flex gap-3">
+                  <kbd
+                    style={{
+                      padding: "0.5rem 0.75rem",
+                      border: "1px solid white",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    A
+                  </kbd>
+
+                  <kbd
+                    style={{
+                      padding: "0.5rem 0.75rem",
+                      border: "1px solid white",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    S
+                  </kbd>
+
+                  <kbd
+                    style={{
+                      padding: "0.5rem 0.75rem",
+                      border: "1px solid white",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    D
+                  </kbd>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <kbd
+                className="text-center"
+                style={{
+                  padding: "0.5rem 1.5rem",
+                  border: "1px solid white",
+                  borderRadius: "4px",
+                }}
+              >
+                SPACE
+              </kbd>
+            </div>
+          </div>
         </div>
       </div>
     </div>
